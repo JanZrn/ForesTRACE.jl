@@ -15,7 +15,7 @@ using TerminalLoggers
 using ProgressLogging
 using DataFrames
 
-export Voxel, create_voxels, ray_voxel_intersect!, stop_voxel_intersect!, raytrace!, top_vox
+export Voxel, create_voxels, intersects, ray_voxel_intersect!, stop_voxel_intersect!, raytrace!, top_vox
 
 ### The new struct Voxel
 mutable struct Voxel 
@@ -24,6 +24,65 @@ mutable struct Voxel
     stop::Int32 # how many rays ended in this voxel
 end
 
+### Creates a space of empty voxels - environment
+function create_voxels(extent_x,extent_y,extent_z,voxel_side_length::Float64) 
+    x0=ceil.(extent_x[1]) -1 
+    y0=ceil.(extent_y[1]) -1
+    z0=ceil.(extent_z[1]) -1 #-1 so it includes the edge laser-points
+    xmax=ceil.(extent_x[2])
+    ymax=ceil.(extent_y[2])
+    zmax=ceil.(extent_z[2])
+    grid=CartesianGrid((x0,y0,z0),(xmax,ymax,zmax),(voxel_side_length,voxel_side_length,voxel_side_length))
+
+    [Voxel(Meshes.Box((grid[i].vertices[1]),(grid[i].vertices[7])), 0 , 0 ) for i in 1:length(grid)]
+end
+
+### A new iteration of the hasintersect function, that works with our Voxel structure
+### If a Voxel is penetrated by the ray, does it also end there?
+
+### Intersects voxels with rays
+function intersects(box::Meshes.Box, seg::Meshes.Segment) # voxel and ray
+    seg_start, seg_end = coordinates.(seg.vertices)
+    box_min, box_max = coordinates(box.min), coordinates(box.max)
+
+    seg_length = seg_end .- seg_start
+    seg_start_to_box_min = box_min .- seg_start
+    seg_start_to_box_max = box_max .- seg_start
+
+    tnear = floatmin(Float64)
+    tfar = floatmax(Float64)
+
+    for axis in eachindex(seg_length)
+        if seg_length[axis] == 0 # parallel
+            if (seg_start_to_box_min[axis] > 0) || (seg_start_to_box_max[axis] < 0)
+                    return false # segment is not between planes
+            end
+        else
+            t1 = seg_start_to_box_min[axis] / seg_length[axis]
+            t2 = seg_start_to_box_max[axis] / seg_length[axis]
+
+            tmin = minimum([t1, t2])
+            tmax = maximum([t1, t2])
+
+            if tmin > tnear   tnear = tmin end
+            if tmax < tfar    tfar = tmax end
+            if (tnear > tfar) || (tfar < 0.0)
+                return false
+            end
+        end
+    end
+    if (tnear >= 0) && (tnear <= 1)  return true end
+    if (tfar >= 0) && (tfar <= 1)  return true end
+    return false
+end
+
+### Intersects voxels with end points
+function intersects(box::Meshes.Box{3, Float64}, point::Meshes.Point) # voxel and the end point
+    x, y, z = coordinates(point)
+    xmax, ymax, zmax = coordinates(box.max)
+    xmin, ymin, zmin = coordinates(box.min)
+    ((x < xmax) && (x > xmin)) && ((y < ymax) && (y > ymin)) && ((z < zmax) && (z > zmin))
+end
 
 ### Cycles the intersect function with ::Segment through the voxel space
 function ray_voxel_intersect!(voxel::Voxel,ray::Meshes.Segment) # adds the .pass value into the Voxel struct
