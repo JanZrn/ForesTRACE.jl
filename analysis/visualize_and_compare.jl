@@ -1,3 +1,4 @@
+using FileIO, LasIO, LazIO
 using Meshes
 using DataFrames
 using MeshViz
@@ -14,18 +15,23 @@ using .VoxelsMod
 ### I decided to recreate the voxel space and pass it into the DataFrames
 
 ### load the DataFrames to be compared
-df_raytrace = DataFrame(CSV.File("D:/jazr0001/Ray_Tracing_MasterThesis/data/swe/SE_160/2022-10-06_09-57-12_results/2022-10-06_09-57-12_df_raytraced_1x1x1v_400000r.csv"))
+df_raytrace = DataFrame(CSV.File("D:/jazr0001/Ray_Tracing_MasterThesis/95th_percentile/tops/2023-10-13_09-44-40_raytraced_0.1v_pine_B.csv"))
 
-### "recreate" voxel space 
-voxels=create_voxels((0.0, 18.0), (0.0, 18.0), (0.0, 24.0), 1.0) ### change this according to the voxel environment (now 0, 18 for X znd Y and 0, max Z)
+### Point cloud of the analysed tree
+header, points = LazIO.load("D:/jazr0001/Ray_Tracing_MasterThesis/95th_percentile/tops/2023-10-13_09-44-40_pine_B.laz")
 
-### change string from DF into voxel_space
+### Recreate voxel space 
+### Change this according to the voxel environment
+voxels=create_voxels((header.x_min, header.x_max), (header.y_min, header.y_max), (header.z_min, header.z_max), 0.1) 
+
+### Changes the string .poly into voxel .poly in the DataFrame
 df_raytrace.poly = [voxels[i].poly for i in 1:length(voxels)]
+
 
 ### Visualization of openness
 function voxel_viz_openness(voxel::DataFrame)
     p = Scene()
-    p = viz(voxel.poly, color = voxel.openness2, alpha = (voxel.openness2))
+    p = viz(voxel.poly, color = voxel.openness, alpha = (voxel.openness))
     return p
 end
 
@@ -50,6 +56,11 @@ function voxel_viz_stop(voxel::DataFrame)
     return p
 end
 
+function voxel_viz_grey(voxel::DataFrame)
+    p = Scene()
+    p = viz(voxel.poly, color = :grey, alpha = (voxel.openness))
+    return p
+end
 
 ### visualization
 
@@ -86,4 +97,14 @@ save("D:/jazr0001/Ray_Tracing_MasterThesis/data/plots/swe/2022-10-06_09-57-12/1x
 df_raytrace_stop = filter(row -> row.stop > 0, df_raytrace)
 
 plot_stop = voxel_viz_stop(df_raytrace_stop)
-save("D:/jazr0001/Ray_Tracing_MasterThesis/data/plots/swe/2022-10-06_09-57-12/1x1x1_400.000r_2022-10-06_09-57-12_plot_stop.png", plot_stop)
+save("D:/jazr0001/Ray_Tracing_MasterThesis/95th_percentile/pine_B_stop_control.png", plot_stop)
+
+### Non-open
+df_raytrace_nonopen = filter(row -> row.openness < 0.95 && row.occlusion == 0.0, df_raytrace)
+plot_nonopen = voxel_viz_openness(df_raytrace_nonopen)
+save("D:/jazr0001/Ray_Tracing_MasterThesis/95th_percentile/pine_B_open_control.png", plot_nonopen)
+
+### voxel_viz_grey
+
+grey = voxel_viz_grey(df_raytrace_nonopen)
+save("D:/jazr0001/Ray_Tracing_MasterThesis/95th_percentile/G-T_grey.png", grey)
