@@ -114,7 +114,7 @@ function top_vox(gdf, threshold::Float64)
     x = 0.0
     y = 0.0
 for i in 1:size(gdf, 1)
-    if (0.0 < gdf.openness[i] < threshold) & (gdf.occlusion[i] == 0.0) # if the voxel is considered open and non occluded
+    if (0.0 < gdf.openness[i] < threshold) & (gdf.stop[i] > 1) & (gdf.occlusion[i] == 0.0) # if the voxel is considered open, has at least two stop points and non occluded
         topvox = gdf.middles_z[i]
         x = gdf.middles_x[i]
         y = gdf.middles_y[i]
