@@ -14,8 +14,10 @@ using Meshes
 using TerminalLoggers
 using ProgressLogging
 using DataFrames
+using MeshViz
+using GLMakie
 
-export Voxel, create_voxels, intersects, ray_voxel_intersect!, stop_voxel_intersect!, raytrace!, top_vox
+export Voxel, create_voxels, intersects, ray_voxel_intersect!, stop_voxel_intersect!, raytrace!, top_vox, voxel_viz_solids, voxel_viz_occlusion, voxel_viz_focus, voxel_viz_openness
 
 ### The new struct Voxel
 mutable struct Voxel 
@@ -123,6 +125,45 @@ for i in 1:size(gdf, 1)
     end
 end
 return topvox, x, y #returns (Z, X, Y)
+end
+
+
+### Visualization
+### Visualization of openness
+### If solid = true, will show only the solids with their openness, if false, will show evetrything
+function voxel_viz_openness(voxel::DataFrame, solid::Bool, threshold)
+    p = Scene()
+
+    if solid == true
+        voxel! = filter(row -> row.openness < threshold && row.occlusion == 0.0, voxel)
+    p = viz(voxel!.poly, color = voxel!.openness, alpha = (voxel!.openness))
+    else
+    p = viz(voxel.poly, color = voxel.openness, alpha = (voxel.openness))
+    end
+    return p
+end
+
+### Visualization of focus/user bias
+function voxel_viz_focus(voxel::DataFrame)
+    p = Scene()
+    p = viz(voxel.poly, color = voxel.focus , alpha = (voxel.focus))
+    return p
+end
+
+### Visualization of occlusion
+function voxel_viz_occlusion(voxel::DataFrame, clr)
+    voxel! = filter(row -> row.occlusion == 1.0, voxel)
+    p = Scene()
+    p = viz(voxel!.poly, color = clr, alpha = 0.5)
+    return p
+end
+
+### Visualization of voxels with openness lower than a threshold for openness
+function voxel_viz_solids(voxel::DataFrame, clr, threshold)
+    voxel! = filter(row -> row.openness < threshold && row.occlusion == 0.0, voxel)
+    p = Scene()
+    p = viz(voxel!.poly, color = clr, alpha = 0.5)
+    return p
 end
 
 end # end of module
