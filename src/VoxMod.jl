@@ -14,10 +14,19 @@ using Meshes
 using TerminalLoggers
 using ProgressLogging
 using DataFrames
-using MeshViz
-using GLMakie
+using FileIO, LasIO, LazIO
+using Statistics
+#using MeshViz
+#using GLMakie
 
-export Voxel, create_voxels, intersects, ray_voxel_intersect!, stop_voxel_intersect!, raytrace!, top_vox, voxel_viz_solids, voxel_viz_occlusion, voxel_viz_focus, voxel_viz_openness
+export Voxel, create_voxels, intersects, ray_voxel_intersect!, stop_voxel_intersect!, raytrace!
+export get_middles, filter_underground_occ, occlusion_rate, top_vox
+export voxel_viz_solids, voxel_viz_occlusion, voxel_viz_focus, voxel_viz_openness
+
+### My modules
+include("PtCloudManipulation.jl")
+using .PtCloudManpMod
+
 
 ### The new struct Voxel
 mutable struct Voxel 
@@ -108,13 +117,58 @@ function raytrace!(voxel_space::Vector{Main.VoxelsMod.Voxel}, ray_vector::Vector
     return voxel_space # returns the modified voxel space
 end
 
+### Adds middles of voxels into the DataFrame
+### Syntax = df.middles_x, df.middles_y, df.middles_z = get_middles(df)
+function get_middles(df::DataFrame)
+    df.middles_x .= [(coordinates(df.poly[i](0))[1] + ((coordinates(df.poly[i](0))[1] - coordinates(df.poly[i](1))[1])/2)) for i in 1:size(df, 1)]
+    df.middles_y .= [(coordinates(df.poly[i](0))[2] + ((coordinates(df.poly[i](0))[2] - coordinates(df.poly[i](1))[2])/2)) for i in 1:size(df, 1)]
+    df.middles_z .= [(coordinates(df.poly[i](0))[3] + ((coordinates(df.poly[i](0))[3] - coordinates(df.poly[i](1))[3])/2)) for i in 1:size(df, 1)]
+    return df.middles_x, df.middles_y, df.middles_z
+end
+
+### Function that goes through all the columns in the given environment and filters all voxels laying under the presumed ground
+### It is fed a dataframe of the analysed environment and returns the filtered dataframe without voxels under ground
+
+### So far the fastest iteration, but I feel like it can still be optimized
+### I played with broadcasting etc, but this was still the fastest
+
+function filter_underground_occ(df::DataFrame, voxel_resolution, ground_points, ground_header) # Arguments are: DataFrame, voxel resolution and ground points with its header
+
+    ### Create individual columns of set X and Y and changing Z from the DataFrame
+    ### Extracting the coordinates of voxel middles
+    df.middles_x, df.middles_y, df.middles_z = get_middles(df)
+    
+    ### Creates columns (groups) with same X and Y coordinates
+        gdf = groupby(df, [:middles_x, :middles_y] )
+        x = [gdf[i].middles_x[1] for i in eachindex(gdf)] # extracts x coords of each column
+        y = [gdf[i].middles_y[1] for i in eachindex(gdf)] # extracts y coords of each column
+        kernel = [Meshes.Box((x[i] - (1.5*voxel_resolution), y[i] - (1.5*voxel_resolution)), (x[i] + (1.5*voxel_resolution), y[i] + (1.5*voxel_resolution))) for i in eachindex(x)] # creates a 3x3 (*vox size) kernel for each column
+        
+        ground_pts = [filter_pixel!(ground_points, ground_header, kernel[i]) for i in eachindex(kernel)] # filters ground points for each column
+        ground_z = [mean(zcoord.(ground_pts[i], (ground_header,))) for i in eachindex(ground_pts)] # gets a mean ground value for each column
+    
+        grnd_coord = DataFrame(:x => x, :y => y, :z => ground_z) # creates a Dataframe for each column
+        filtered_groups = [filter(row -> row.middles_z >= ground_z[i], gdf[(middles_x = grnd_coord.x[i], middles_y = grnd_coord.y[i])]) for i in eachindex(ground_z)] # deletes voxels below ground value
+        
+        voxels_no_ground_occlusion = vcat(filtered_groups...) # merges all into one DataFrame
+        
+return voxels_no_ground_occlusion
+end
+
+### Occlusion rate function
+function occlusion_rate(df::DataFrame)
+    occ_rate::Float64 = (nrow(filter(row -> row.occlusion == 1.0, df)) / nrow(df)) * 100
+return occ_rate
+end
+
 ### For G-T method of acquiring the highest non-open voxel
-### Must be a GroupedDataFrame
+### Must be a DataFrame
 ### Cycles through all the colummns and finds the highest non-open voxel (threshold < 0,95)
 function top_vox(gdf, threshold::Float64)
     topvox = 0.0
     x = 0.0
     y = 0.0
+
 for i in 1:size(gdf, 1)
     if (0.0 < gdf.openness[i] < threshold) & (gdf.stop[i] > 1) & (gdf.occlusion[i] == 0.0) # if the voxel is considered open, has at least two stop points and non occluded
         topvox = gdf.middles_z[i]
