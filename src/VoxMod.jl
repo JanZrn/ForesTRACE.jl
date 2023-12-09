@@ -16,10 +16,12 @@ using ProgressLogging
 using DataFrames
 using FileIO, LasIO, LazIO
 using Statistics
-#using MeshViz
-#using GLMakie
+using MeshViz
+using GLMakie
 
-export Voxel, create_voxels, intersects, ray_voxel_intersect!, stop_voxel_intersect!, raytrace!
+export Voxel, create_voxels, intersects, ray_voxel_intersect!, stop_voxel_intersect!
+export raytrace!, focus, occlusion, openness, rt_quantifiers
+export get_topvox, gt_height
 export get_middles, filter_underground_occ, occlusion_rate, top_vox
 export voxel_viz_solids, voxel_viz_occlusion, voxel_viz_focus, voxel_viz_openness
 
@@ -126,6 +128,28 @@ function get_middles(df::DataFrame)
     return df.middles_x, df.middles_y, df.middles_z
 end
 
+### add ray tracing quantifiers - openness, occlusion and focus
+function rt_quantifiers(df::DataFrame)
+    df.openness = openness(df)
+    df.focus = focus(df)
+    df.occlusion = occlusion(df)
+    return df.openness, df.focus, df.occlusion
+end
+
+function openness(df::DataFrame)
+    openness_NaN = (df.pass .- df.stop) ./ df.pass
+    df.openness .= [isnan(op) ? 0.0 : op for op in openness_NaN]
+    return df.openness
+end
+
+function focus(df::DataFrame)
+    df.focus = ((df.pass) ./ sum(df.pass))
+end
+
+function occlusion(df::DataFrame)
+    df.occlusion = float.(iszero.(df.pass))
+end
+
 ### Function that goes through all the columns in the given environment and filters all voxels laying under the presumed ground
 ### It is fed a dataframe of the analysed environment and returns the filtered dataframe without voxels under ground
 
@@ -163,7 +187,6 @@ end
 
 ### For G-T method of acquiring the highest non-open voxel
 ### Must be a DataFrame
-### Cycles through all the colummns and finds the highest non-open voxel (threshold < 0,95)
 function top_vox(gdf, threshold::Float64)
     topvox = 0.0
     x = 0.0
@@ -181,6 +204,23 @@ end
 return topvox, x, y #returns (Z, X, Y)
 end
 
+### Cycles through all the colummns and finds the highest non-open voxel (threshold < 0,95)
+function get_topvox(df::DataFrame, threshold)
+    df.middles_x, df.middles_y, df.middles_z = get_middles(df)
+    gdf = groupby(df, [:middles_x, :middles_y] )
+    topvox_info = maximum([top_vox(gdf[g], threshold) for g in 1:length(gdf)])
+    return topvox_info
+end
+
+### G-T height acquisition - the distance between the TopVox and the ground below it
+function gt_height(df::DataFrame, threshold, ground_points, ground_header)
+    topvox_info = get_topvox(df, threshold)
+    ground_buffer = Meshes.Box((topvox_info[2] - 1, topvox_info[3] - 1), (topvox_info[2] + 1, topvox_info[3] + 1))
+    ground_points!, ground_header! = filter_pixel!(ground_points, ground_header, ground_buffer)
+    ground_z = mean(zcoord(ground_points!, ground_header))
+    G_T_height = (topvox_info[1] + abs(ground_z))
+return G_T_height
+end
 
 ### Visualization
 ### Visualization of openness
@@ -200,7 +240,7 @@ end
 ### Visualization of focus/user bias
 function voxel_viz_focus(voxel::DataFrame)
     p = Scene()
-    p = viz(voxel.poly, color = voxel.focus , alpha = (voxel.focus))
+    p = viz(voxel.poly, color = (sqrt(voxel.focus) * 100) , alpha = ((sqrt(voxel.focus) * 100)))
     return p
 end
 
